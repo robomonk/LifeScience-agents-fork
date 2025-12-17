@@ -14,6 +14,7 @@
 
 """Tool for searching for articles on PubMed."""
 
+import os
 from Bio import Medline, Entrez
 
 def fetch_pubmed_articles(search_query: str) -> str:
@@ -27,7 +28,7 @@ def fetch_pubmed_articles(search_query: str) -> str:
         A formatted string with the titles and abstracts of the search results.
     """
     # NCBI requires you to identify yourself with an email address.
-    Entrez.email = "your.email@example.com"  # Please replace with your email
+    Entrez.email = os.getenv("ENTREZ_EMAIL")  # Please replace with your email
 
     try:
         handle = Entrez.esearch(db="pubmed", sort="relevance", term=search_query, retmax=3)

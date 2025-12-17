@@ -12,15 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Deployment script for the Clinical Research Synthesizer Agent."""
+"""Deployment script for the Drug Discovery Agent."""
 
 import os
+import asyncio
 import vertexai
 from absl import app, flags
 from dotenv import load_dotenv
-from clinical_research_synthesizer.agent import root_agent
 from vertexai import agent_engines
-from vertexai.preview.reasoning_engines import AdkApp
+
+# Fix for "RuntimeError: This event loop is already running"
+import nest_asyncio
+nest_asyncio.apply()
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("project_id", None, "GCP project ID.")
@@ -33,24 +36,73 @@ flags.DEFINE_bool("list", False, "Lists all agents.")
 flags.mark_bool_flags_as_mutual_exclusive(["create", "delete", "list"])
 
 
+# --- CUSTOM ENGINE CLASS ---
+class DrugDiscoveryEngine:
+    def __init__(self):
+        # Do nothing here to ensure safe unpickling in the cloud
+        pass
+
+    def query(self, input: str) -> str:
+        """
+        Query the agent.
+        
+        Args:
+            input: The user's prompt or question.
+        
+        Returns:
+            The agent's response as a string.
+        """
+        try:
+            # 1. Setup Environment
+            import nest_asyncio
+            nest_asyncio.apply()
+            
+            # 2. Import Agent (Lazy load to avoid connection errors)
+            from drug_discovery_agent.agent import root_agent
+
+            # 3. Run the Agent
+            async def _run_agent():
+                response_text = []
+                # Pass the explicit 'input' variable to the agent
+                async for event in root_agent.run_async(input):
+                    if hasattr(event, 'text') and event.text:
+                        response_text.append(event.text)
+                    elif isinstance(event, str):
+                        response_text.append(event)
+                
+                if not response_text:
+                    return "Agent finished execution but produced no text output."
+                return "".join(response_text)
+
+            return asyncio.run(_run_agent())
+
+        except Exception as e:
+            # 4. Report Crash Details
+            import traceback
+            return f"⚠️ AGENT CRASHED:\nError Type: {type(e).__name__}\nError Message: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+
+
 def create_agent(env_vars):
-    """Creates a new Agent Engine for the Clinical Research Synthesizer."""
-    adk_app = AdkApp(agent=root_agent)
+    """Creates a new Agent Engine for the Drug Discovery agent."""
+    
     remote_agent = agent_engines.create(
-        adk_app,
-        display_name="clinical-research-synthesizer", # New agent name
+        DrugDiscoveryEngine(),
+        display_name="agentic-tx",
         requirements=[
             "google-adk>=1.9.0",
             "google-cloud-aiplatform>=1.55.0",
             "python-dotenv>=1.0.1",
             "biopython>=1.83",
             "pubchempy>=1.0.4",
-            "requests>=2.32.0",
-            "PyPDF2>=3.0.0",
-            "beautifulsoup4>=4.12.0",
+            "google-search-results>=2.4.2",
+            "requests>=2.0.0",
+            "nest_asyncio>=1.5.0",
+            "pydantic>=2.0.0", # Added explicit pydantic for schema generation
         ],
-        extra_packages=["./clinical_research_synthesizer"],
-        env_vars=env_vars,
+        extra_packages=[
+            "./drug_discovery_agent"
+        ],
+        env_vars=env_vars
     )
     print(f"Created remote agent: {remote_agent.resource_name}")
 
@@ -82,28 +134,15 @@ def main(_):
     location = FLAGS.location or os.getenv("GOOGLE_CLOUD_LOCATION")
     bucket = FLAGS.bucket or os.getenv("GOOGLE_CLOUD_STORAGE_BUCKET")
 
-    # Load secrets from the .env file for the agent engine.
-    # need IDs for MedGemma and TxGemma Chat.
-    env_vars["MEDGEMMA_ENDPOINT_ID"] = os.getenv("MEDGEMMA_ENDPOINT_ID")
-    #env_vars["TXGEMMA_CHAT_ENDPOINT_ID"] = os.getenv("TXGEMMA_CHAT_ENDPOINT_ID")
+    env_vars["TXGEMMA_PREDICT_ENDPOINT_ID"] = os.getenv("TXGEMMA_PREDICT_ENDPOINT_ID")
+    env_vars["TXGEMMA_CHAT_ENDPOINT_ID"] = os.getenv("TXGEMMA_CHAT_ENDPOINT_ID")
+    env_vars["ENTREZ_EMAIL"] = os.getenv("ENTREZ_EMAIL")
+    env_vars["GOOGLE_GENAI_USE_VERTEXAI"] = os.getenv("GOOGLE_GENAI_USE_VERTEXAI")
 
-    if not all(
-        [
-            project_id,
-            location,
-            bucket,
-            env_vars["MEDGEMMA_ENDPOINT_ID"],
-        #    env_vars["TXGEMMA_CHAT_ENDPOINT_ID"],
-        ]
-    ):
-        raise ValueError(
-            "Missing required config. Set all required variables in your "
-            ".env file or as flags."
-        )
+    if not all([project_id, location, bucket, env_vars["TXGEMMA_PREDICT_ENDPOINT_ID"]]):
+        raise ValueError("Missing required config. Check your .env file.")
 
-    vertexai.init(
-        project=project_id, location=location, staging_bucket=f"gs://{bucket}"
-    )
+    vertexai.init(project=project_id, location=location, staging_bucket=f"gs://{bucket}")
 
     if FLAGS.create:
         create_agent(env_vars)

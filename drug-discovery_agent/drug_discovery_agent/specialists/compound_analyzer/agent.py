@@ -19,7 +19,7 @@ from . import prompt
 # Import the new tool
 from .tools import predict_toxicity, identify_compound, get_smiles
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-2.5-pro"
 
 compound_analyzer = Agent(
     name="compound_analyzer",

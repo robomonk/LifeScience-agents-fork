@@ -18,7 +18,7 @@ from google.adk.agents import Agent
 from . import prompt
 from .tools import fetch_articles, therapeutics_chat
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-2.5-pro"
 
 literature_researcher = Agent(
     name="literature_researcher",

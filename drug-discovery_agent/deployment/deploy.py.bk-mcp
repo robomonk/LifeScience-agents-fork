@@ -5,8 +5,7 @@ import os
 import vertexai
 from absl import app, flags
 from dotenv import load_dotenv
-# FIX: Import 'root_agent' (the correct name defined in your agent.py)
-from clinical_research_synthesizer.agent import root_agent 
+from drug_discovery_agent.agent import root_agent
 from vertexai import agent_engines
 from vertexai.preview.reasoning_engines import AdkApp
 
@@ -17,55 +16,58 @@ flags.DEFINE_string("bucket", None, "GCP storage bucket for staging.")
 flags.DEFINE_bool("create", False, "Creates a new agent.")
 
 def create_agent(env_vars):
-    print("🚀 Deploying CLINICAL RESEARCHER (ADK + Telemetry)...")
+    print(f"🚀 Deploying INFRA AGENT (Native Cloud SDKs)...")
     
-    # FIX: Use the correct agent instance
     adk_app = AdkApp(agent=root_agent)
     
     remote_agent = agent_engines.create(
         adk_app,
-        display_name="clinical-research-adk",
+        display_name="drug-discovery-infra-sdk",
         requirements=[
-            "google-cloud-aiplatform==1.126.1", # Pinned Stable SDK
-            "google-adk>=1.17.0",               # Telemetry Support
+            "google-cloud-aiplatform==1.126.1",
+            "google-adk>=1.17.0",
+            # Telemetry
             "opentelemetry-instrumentation-google-genai>=0.4b0",
             "opentelemetry-exporter-gcp-logging",
             "opentelemetry-exporter-gcp-monitoring",
             "opentelemetry-exporter-otlp-proto-grpc",
             "opentelemetry-instrumentation-vertexai>=2.0b0",
+            # Dependencies
             "python-dotenv>=1.0.1",
+            "biopython>=1.83",
+            "pubchempy>=1.0.4",
             "google-search-results>=2.4.2",
-            "pandas>=2.0.3",
-            "lxml>=4.9.3",
-            "requests>=2.31.0",
-            "beautifulsoup4>=4.12.3",
             "pydantic==2.11.7",
-            "cloudpickle==3.1.1"
+            "cloudpickle==3.1.1",
+            # NEW: Infrastructure SDKs
+            "google-cloud-compute>=1.15.0",
+            "google-cloud-container>=2.30.0"
         ],
-        extra_packages=["./clinical_research_synthesizer"],
+        extra_packages=["./drug_discovery_agent"],
         env_vars=env_vars
     )
     print(f"✅ Created remote agent: {remote_agent.resource_name}")
 
 def main(_):
     load_dotenv()
+    
     env_vars = {
+        "AGENT_MODEL": os.getenv("AGENT_MODEL", "gemini-1.5-pro-002"),
         "TXGEMMA_PREDICT_ENDPOINT_ID": os.getenv("TXGEMMA_PREDICT_ENDPOINT_ID", "placeholder"),
         "TXGEMMA_CHAT_ENDPOINT_ID": os.getenv("TXGEMMA_CHAT_ENDPOINT_ID", "placeholder"),
-        "MEDGEMMA_ENDPOINT_ID": os.getenv("MEDGEMMA_ENDPOINT_ID", "placeholder"),
         "SERPAPI_API_KEY": os.getenv("SERPAPI_API_KEY", "placeholder"),
-        "OTEL_SERVICE_NAME": "clinical-research-agent",
+        "OTEL_SERVICE_NAME": "drug-discovery-agent",
         "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED": "true",
         "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "true"
     }
-    # Filter empty
     env_vars = {k: v for k, v in env_vars.items() if v}
-    
+
     vertexai.init(project=os.getenv("GOOGLE_CLOUD_PROJECT"), 
                   location=os.getenv("GOOGLE_CLOUD_LOCATION"), 
                   staging_bucket=f"gs://{os.getenv('GOOGLE_CLOUD_STORAGE_BUCKET')}")
 
-    if FLAGS.create: create_agent(env_vars)
+    if FLAGS.create:
+        create_agent(env_vars)
 
 if __name__ == "__main__":
     app.run(main)
